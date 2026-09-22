@@ -1,0 +1,277 @@
+// =============================================================================
+//  zVWAPduo MTF Matrix Radar v2.1 (Hardcoded Freshest-First Sorting)
+//  8 Tickers x 5 Timeframes (5m, 15m, 1h, 2h, 3h) = Exactly 40 Calls
+// =============================================================================
+//@version=6
+indicator("zVWAPduo Matrix 5min-3hr", shorttitle="zVWPMtrx5m", overlay=true)
+
+// -----------------------------------------------------------------------------
+//  Inputs
+// -----------------------------------------------------------------------------
+grpSym = "01 — Tickers (8 Max for 5 Timeframes)"
+sym01 = input.symbol("COINBASE:BTCUSD",  "01", inline="s1", group=grpSym)
+sym02 = input.symbol("COINBASE:ETHUSD",  "02", inline="s1", group=grpSym)
+sym03 = input.symbol("COINBASE:SOLUSD",  "03", inline="s2", group=grpSym)
+sym04 = input.symbol("COINBASE:XRPUSD",  "04", inline="s2", group=grpSym)
+sym05 = input.symbol("COINBASE:LINKUSD", "05", inline="s3", group=grpSym)
+sym06 = input.symbol("COINBASE:ADAUSD",  "06", inline="s3", group=grpSym)
+sym07 = input.symbol("COINBASE:INJUSD",  "07", inline="s4", group=grpSym)
+sym08 = input.symbol("COINBASE:XLMUSD",  "08", inline="s4", group=grpSym)
+
+grpSort = "02 — Dynamic Sorting (Always Freshest First)"
+sortByTf = input.string("5m", "Sort Rows By Timeframe", 
+     options=["None (Default Order)", "5m", "15m", "1h", "2h", "3h"], group=grpSort,
+     tooltip="Rows are always sorted in ascending order (freshest / lowest bar age at the top).")
+
+grpCore = "03 — Engine Settings"
+ageMode     = input.string("Visual Triangle Anchor", "Measure Age From", 
+                 options=["Visual Triangle Anchor", "Confirmation Bar"], group=grpCore)
+winBars     = input.int(4, "Visual Anchor Gap Filter", minval=0, maxval=15, group=grpCore)
+freshAgeMax = input.int(10, "Highlight Combos Younger Than (Bars)", minval=1, maxval=100, group=grpCore)
+
+grpUI = "04 — UI & Layout Adjustments"
+tablePos    = input.string("Middle Right", "Matrix Position", 
+                 options=["Top Right", "Middle Right", "Bottom Right", "Bottom Left", "Top Left"], group=grpUI)
+textSize    = input.string("Normal", "Text Size", 
+                 options=["Tiny", "Small", "Normal", "Large", "Huge"], group=grpUI)
+topPadRows  = input.int(0, "Vertical Nudge (Top Spacer Rows)", minval=0, maxval=8, group=grpUI,
+                 tooltip="Adds blank transparent rows above the table to shift it downward away from candles.")
+
+// -----------------------------------------------------------------------------
+//  Core v2.3 Calculation Function
+// -----------------------------------------------------------------------------
+f_calcZVWAP(int window, string mode) =>
+    int b = bar_index
+    // Slow Core (50)
+    bool z2IsPH = ta.highestbars(high, 50) == 0
+    bool z2IsPL = ta.lowestbars(low, 50) == 0
+    var int z2PhL = b
+    var int z2PlL = b
+    z2PhL := z2IsPH ? b : z2PhL
+    z2PlL := z2IsPL ? b : z2PlL
+    int z2Dir = z2PhL > z2PlL ? 1 : -1
+    bool z2Turn = z2Dir != z2Dir[1]
+    int z2Anchor = z2Dir > 0 ? z2PlL : z2PhL
+
+    // Fast Core (20)
+    bool z1IsPH = ta.highestbars(high, 20) == 0
+    bool z1IsPL = ta.lowestbars(low, 20) == 0
+    var int z1PhL = b
+    var int z1PlL = b
+    z1PhL := z1IsPH ? b : z1PhL
+    z1PlL := z1IsPL ? b : z1PlL
+    int z1Dir = z1PhL > z1PlL ? 1 : -1
+    bool z1Turn = z1Dir != z1Dir[1]
+    int z1Anchor = z1Dir > 0 ? z1PlL : z1PhL
+
+    int gap = math.abs(z1Anchor - z2Anchor)
+    bool sameDir = (z1Dir == z2Dir)
+
+    var int lastComboDir = 0
+    var int lastComboConfirmBar = na
+    var int lastComboAnchorBar = na
+
+    if (z1Turn or z2Turn) and sameDir and gap <= window
+        lastComboDir := z1Dir
+        lastComboConfirmBar := b
+        lastComboAnchorBar := math.max(z1Anchor, z2Anchor)
+
+    int chosenBaseBar = (mode == "Visual Triangle Anchor") ? lastComboAnchorBar : lastComboConfirmBar
+    int comboAge = na(chosenBaseBar) ? 9999 : math.max(0, b - chosenBaseBar)
+    [lastComboDir, comboAge]
+
+// -----------------------------------------------------------------------------
+//  Security Requests (8 Tickers x 5 TFs = 40 Calls)
+// -----------------------------------------------------------------------------
+[c1_5,   a1_5]   = request.security(sym01, "5",   f_calcZVWAP(winBars, ageMode))
+[c1_15,  a1_15]  = request.security(sym01, "15",  f_calcZVWAP(winBars, ageMode))
+[c1_60,  a1_60]  = request.security(sym01, "60",  f_calcZVWAP(winBars, ageMode))
+[c1_120, a1_120] = request.security(sym01, "120", f_calcZVWAP(winBars, ageMode))
+[c1_180, a1_180] = request.security(sym01, "180", f_calcZVWAP(winBars, ageMode))
+
+[c2_5,   a2_5]   = request.security(sym02, "5",   f_calcZVWAP(winBars, ageMode))
+[c2_15,  a2_15]  = request.security(sym02, "15",  f_calcZVWAP(winBars, ageMode))
+[c2_60,  a2_60]  = request.security(sym02, "60",  f_calcZVWAP(winBars, ageMode))
+[c2_120, a2_120] = request.security(sym02, "120", f_calcZVWAP(winBars, ageMode))
+[c2_180, a2_180] = request.security(sym02, "180", f_calcZVWAP(winBars, ageMode))
+
+[c3_5,   a3_5]   = request.security(sym03, "5",   f_calcZVWAP(winBars, ageMode))
+[c3_15,  a3_15]  = request.security(sym03, "15",  f_calcZVWAP(winBars, ageMode))
+[c3_60,  a3_60]  = request.security(sym03, "60",  f_calcZVWAP(winBars, ageMode))
+[c3_120, a3_120] = request.security(sym03, "120", f_calcZVWAP(winBars, ageMode))
+[c3_180, a3_180] = request.security(sym03, "180", f_calcZVWAP(winBars, ageMode))
+
+[c4_5,   a4_5]   = request.security(sym04, "5",   f_calcZVWAP(winBars, ageMode))
+[c4_15,  a4_15]  = request.security(sym04, "15",  f_calcZVWAP(winBars, ageMode))
+[c4_60,  a4_60]  = request.security(sym04, "60",  f_calcZVWAP(winBars, ageMode))
+[c4_120, a4_120] = request.security(sym04, "120", f_calcZVWAP(winBars, ageMode))
+[c4_180, a4_180] = request.security(sym04, "180", f_calcZVWAP(winBars, ageMode))
+
+[c5_5,   a5_5]   = request.security(sym05, "5",   f_calcZVWAP(winBars, ageMode))
+[c5_15,  a5_15]  = request.security(sym05, "15",  f_calcZVWAP(winBars, ageMode))
+[c5_60,  a5_60]  = request.security(sym05, "60",  f_calcZVWAP(winBars, ageMode))
+[c5_120, a5_120] = request.security(sym05, "120", f_calcZVWAP(winBars, ageMode))
+[c5_180, a5_180] = request.security(sym05, "180", f_calcZVWAP(winBars, ageMode))
+
+[c6_5,   a6_5]   = request.security(sym06, "5",   f_calcZVWAP(winBars, ageMode))
+[c6_15,  a6_15]  = request.security(sym06, "15",  f_calcZVWAP(winBars, ageMode))
+[c6_60,  a6_60]  = request.security(sym06, "60",  f_calcZVWAP(winBars, ageMode))
+[c6_120, a6_120] = request.security(sym06, "120", f_calcZVWAP(winBars, ageMode))
+[c6_180, a6_180] = request.security(sym06, "180", f_calcZVWAP(winBars, ageMode))
+
+[c7_5,   a7_5]   = request.security(sym07, "5",   f_calcZVWAP(winBars, ageMode))
+[c7_15,  a7_15]  = request.security(sym07, "15",  f_calcZVWAP(winBars, ageMode))
+[c7_60,  a7_60]  = request.security(sym07, "60",  f_calcZVWAP(winBars, ageMode))
+[c7_120, a7_120] = request.security(sym07, "120", f_calcZVWAP(winBars, ageMode))
+[c7_180, a7_180] = request.security(sym07, "180", f_calcZVWAP(winBars, ageMode))
+
+[c8_5,   a8_5]   = request.security(sym08, "5",   f_calcZVWAP(winBars, ageMode))
+[c8_15,  a8_15]  = request.security(sym08, "15",  f_calcZVWAP(winBars, ageMode))
+[c8_60,  a8_60]  = request.security(sym08, "60",  f_calcZVWAP(winBars, ageMode))
+[c8_120, a8_120] = request.security(sym08, "120", f_calcZVWAP(winBars, ageMode))
+[c8_180, a8_180] = request.security(sym08, "180", f_calcZVWAP(winBars, ageMode))
+
+// -----------------------------------------------------------------------------
+//  Helper Functions
+// -----------------------------------------------------------------------------
+f_cleanTicker(string sym) =>
+    arr = str.split(sym, ":")
+    raw = arr.size() > 1 ? arr.get(1) : sym
+    clean = str.replace_all(raw, "USD", "")
+    clean := str.replace_all(clean, "USDT", "")
+    clean
+
+f_pos(string p) =>
+    switch p
+        "Top Right"    => position.top_right
+        "Middle Right" => position.middle_right
+        "Bottom Right" => position.bottom_right
+        "Top Left"     => position.top_left
+        => position.bottom_left
+
+f_size(string s) =>
+    switch s
+        "Tiny"   => size.tiny
+        "Small"  => size.small
+        "Large"  => size.large
+        "Huge"   => size.huge
+        => size.normal
+
+// -----------------------------------------------------------------------------
+//  Table Definition & Hardcoded Ascending Sort Engine
+// -----------------------------------------------------------------------------
+var table mat = table.new(f_pos(tablePos), 6, 20, border_width=1, border_color=color.new(color.gray, 60))
+
+f_fillCell(table t, int col, int row, int cDir, int age, int maxAge, string sz) =>
+    bool isFresh = age <= maxAge
+    color bg = cDir > 0 ? (isFresh ? color.new(#00e676, 15) : color.new(#00e676, 75)) :
+               cDir < 0 ? (isFresh ? color.new(#ff1744, 15) : color.new(#ff1744, 75)) :
+               color.new(color.black, 45)
+    
+    color txtCol = isFresh ? color.white : color.new(color.white, 35)
+    string txt = (age >= 9999 or cDir == 0) ? "—" : str.tostring(age) + "b"
+    table.cell(t, col, row, txt, text_color=txtCol, bgcolor=bg, text_size=f_size(sz))
+
+if barstate.islast
+    table.clear(mat, 0, 0, 5, 19)
+
+    // Build row index map (0 to 7)
+    int[] rowOrder = array.new_int(8)
+    for i = 0 to 7
+        array.set(rowOrder, i, i)
+
+    // Dynamic key assignment based on selected timeframe
+    if sortByTf != "None (Default Order)"
+        int[] sortKeys = array.new_int(8)
+        array.set(sortKeys, 0, sortByTf == "5m" ? a1_5 : sortByTf == "15m" ? a1_15 : sortByTf == "1h" ? a1_60 : sortByTf == "2h" ? a1_120 : a1_180)
+        array.set(sortKeys, 1, sortByTf == "5m" ? a2_5 : sortByTf == "15m" ? a2_15 : sortByTf == "1h" ? a2_60 : sortByTf == "2h" ? a2_120 : a2_180)
+        array.set(sortKeys, 2, sortByTf == "5m" ? a3_5 : sortByTf == "15m" ? a3_15 : sortByTf == "1h" ? a3_60 : sortByTf == "2h" ? a3_120 : a3_180)
+        array.set(sortKeys, 3, sortByTf == "5m" ? a4_5 : sortByTf == "15m" ? a4_15 : sortByTf == "1h" ? a4_60 : sortByTf == "2h" ? a4_120 : a4_180)
+        array.set(sortKeys, 4, sortByTf == "5m" ? a5_5 : sortByTf == "15m" ? a5_15 : sortByTf == "1h" ? a5_60 : sortByTf == "2h" ? a5_120 : a5_180)
+        array.set(sortKeys, 5, sortByTf == "5m" ? a6_5 : sortByTf == "15m" ? a6_15 : sortByTf == "1h" ? a6_60 : sortByTf == "2h" ? a6_120 : a6_180)
+        array.set(sortKeys, 6, sortByTf == "5m" ? a7_5 : sortByTf == "15m" ? a7_15 : sortByTf == "1h" ? a7_60 : sortByTf == "2h" ? a7_120 : a7_180)
+        array.set(sortKeys, 7, sortByTf == "5m" ? a8_5 : sortByTf == "15m" ? a8_15 : sortByTf == "1h" ? a8_60 : sortByTf == "2h" ? a8_120 : a8_180)
+
+        // Strict Ascending Sort: Freshest (lowest bar age) always placed at top
+        for i = 0 to 6
+            for j = 0 to 6 - i
+                idxA = array.get(rowOrder, j)
+                idxB = array.get(rowOrder, j + 1)
+                valA = array.get(sortKeys, idxA)
+                valB = array.get(sortKeys, idxB)
+                if valA > valB
+                    array.set(rowOrder, j, idxB)
+                    array.set(rowOrder, j + 1, idxA)
+
+    int startRow = topPadRows
+
+    // Header Row
+    table.cell(mat, 0, startRow, "TICKER", text_color=color.yellow, bgcolor=color.black, text_size=f_size(textSize))
+    table.cell(mat, 1, startRow, "5m",     text_color=color.yellow, bgcolor=color.black, text_size=f_size(textSize))
+    table.cell(mat, 2, startRow, "15m",    text_color=color.yellow, bgcolor=color.black, text_size=f_size(textSize))
+    table.cell(mat, 3, startRow, "1h",     text_color=color.yellow, bgcolor=color.black, text_size=f_size(textSize))
+    table.cell(mat, 4, startRow, "2h",     text_color=color.yellow, bgcolor=color.black, text_size=f_size(textSize))
+    table.cell(mat, 5, startRow, "3h",     text_color=color.yellow, bgcolor=color.black, text_size=f_size(textSize))
+
+    // Populate rows in sorted ascending order
+    for r = 0 to 7
+        targetIdx = array.get(rowOrder, r)
+        currRow = startRow + 1 + r
+
+        switch targetIdx
+            0 =>
+                table.cell(mat, 0, currRow, f_cleanTicker(sym01), text_color=color.white, bgcolor=color.new(color.black, 30), text_size=f_size(textSize))
+                f_fillCell(mat, 1, currRow, c1_5, a1_5, freshAgeMax, textSize)
+                f_fillCell(mat, 2, currRow, c1_15, a1_15, freshAgeMax, textSize)
+                f_fillCell(mat, 3, currRow, c1_60, a1_60, freshAgeMax, textSize)
+                f_fillCell(mat, 4, currRow, c1_120, a1_120, freshAgeMax, textSize)
+                f_fillCell(mat, 5, currRow, c1_180, a1_180, freshAgeMax, textSize)
+            1 =>
+                table.cell(mat, 0, currRow, f_cleanTicker(sym02), text_color=color.white, bgcolor=color.new(color.black, 30), text_size=f_size(textSize))
+                f_fillCell(mat, 1, currRow, c2_5, a2_5, freshAgeMax, textSize)
+                f_fillCell(mat, 2, currRow, c2_15, a2_15, freshAgeMax, textSize)
+                f_fillCell(mat, 3, currRow, c2_60, a2_60, freshAgeMax, textSize)
+                f_fillCell(mat, 4, currRow, c2_120, a2_120, freshAgeMax, textSize)
+                f_fillCell(mat, 5, currRow, c2_180, a2_180, freshAgeMax, textSize)
+            2 =>
+                table.cell(mat, 0, currRow, f_cleanTicker(sym03), text_color=color.white, bgcolor=color.new(color.black, 30), text_size=f_size(textSize))
+                f_fillCell(mat, 1, currRow, c3_5, a3_5, freshAgeMax, textSize)
+                f_fillCell(mat, 2, currRow, c3_15, a3_15, freshAgeMax, textSize)
+                f_fillCell(mat, 3, currRow, c3_60, a3_60, freshAgeMax, textSize)
+                f_fillCell(mat, 4, currRow, c3_120, a3_120, freshAgeMax, textSize)
+                f_fillCell(mat, 5, currRow, c3_180, a3_180, freshAgeMax, textSize)
+            3 =>
+                table.cell(mat, 0, currRow, f_cleanTicker(sym04), text_color=color.white, bgcolor=color.new(color.black, 30), text_size=f_size(textSize))
+                f_fillCell(mat, 1, currRow, c4_5, a4_5, freshAgeMax, textSize)
+                f_fillCell(mat, 2, currRow, c4_15, a4_15, freshAgeMax, textSize)
+                f_fillCell(mat, 3, currRow, c4_60, a4_60, freshAgeMax, textSize)
+                f_fillCell(mat, 4, currRow, c4_120, a4_120, freshAgeMax, textSize)
+                f_fillCell(mat, 5, currRow, c4_180, a4_180, freshAgeMax, textSize)
+            4 =>
+                table.cell(mat, 0, currRow, f_cleanTicker(sym05), text_color=color.white, bgcolor=color.new(color.black, 30), text_size=f_size(textSize))
+                f_fillCell(mat, 1, currRow, c5_5, a5_5, freshAgeMax, textSize)
+                f_fillCell(mat, 2, currRow, c5_15, a5_15, freshAgeMax, textSize)
+                f_fillCell(mat, 3, currRow, c5_60, a5_60, freshAgeMax, textSize)
+                f_fillCell(mat, 4, currRow, c5_120, a5_120, freshAgeMax, textSize)
+                f_fillCell(mat, 5, currRow, c5_180, a5_180, freshAgeMax, textSize)
+            5 =>
+                table.cell(mat, 0, currRow, f_cleanTicker(sym06), text_color=color.white, bgcolor=color.new(color.black, 30), text_size=f_size(textSize))
+                f_fillCell(mat, 1, currRow, c6_5, a6_5, freshAgeMax, textSize)
+                f_fillCell(mat, 2, currRow, c6_15, a6_15, freshAgeMax, textSize)
+                f_fillCell(mat, 3, currRow, c6_60, a6_60, freshAgeMax, textSize)
+                f_fillCell(mat, 4, currRow, c6_120, a6_120, freshAgeMax, textSize)
+                f_fillCell(mat, 5, currRow, c6_180, a6_180, freshAgeMax, textSize)
+            6 =>
+                table.cell(mat, 0, currRow, f_cleanTicker(sym07), text_color=color.white, bgcolor=color.new(color.black, 30), text_size=f_size(textSize))
+                f_fillCell(mat, 1, currRow, c7_5, a7_5, freshAgeMax, textSize)
+                f_fillCell(mat, 2, currRow, c7_15, a7_15, freshAgeMax, textSize)
+                f_fillCell(mat, 3, currRow, c7_60, a7_60, freshAgeMax, textSize)
+                f_fillCell(mat, 4, currRow, c7_120, a7_120, freshAgeMax, textSize)
+                f_fillCell(mat, 5, currRow, c7_180, a7_180, freshAgeMax, textSize)
+            7 =>
+                table.cell(mat, 0, currRow, f_cleanTicker(sym08), text_color=color.white, bgcolor=color.new(color.black, 30), text_size=f_size(textSize))
+                f_fillCell(mat, 1, currRow, c8_5, a8_5, freshAgeMax, textSize)
+                f_fillCell(mat, 2, currRow, c8_15, a8_15, freshAgeMax, textSize)
+                f_fillCell(mat, 3, currRow, c8_60, a8_60, freshAgeMax, textSize)
+                f_fillCell(mat, 4, currRow, c8_120, a8_120, freshAgeMax, textSize)
+                f_fillCell(mat, 5, currRow, c8_180, a8_180, freshAgeMax, textSize)
