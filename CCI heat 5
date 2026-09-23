@@ -1,0 +1,117 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Custom 5-Zone Heatmap (5 Explicit Thresholds)
+
+//@version=6
+indicator("CCI-Heatmap 5-Zone", shorttitle="CCI·heat5", overlay=true)
+
+// ══════════════════════════════════════════════════════════════
+// █  DISPLAY
+// ══════════════════════════════════════════════════════════════
+grpDisp       = "█  Display"
+showHeatmap   = input.bool(true,  "Enable Bar Colors", group=grpDisp)
+
+// ══════════════════════════════════════════════════════════════
+// █  CCI CONFIGURATION (5 THRESHOLDS)
+// ══════════════════════════════════════════════════════════════
+grpCCI        = "█  CCI Levels (5 Threshold Boundaries)"
+cciLen        = input.int(89,     "Trend CCI Length", minval=1, maxval=500, group=grpCCI)
+
+// 5 Thresholds defining boundaries for all 5 Zones
+cciThresh1    = input.int(13,     "Zone 1 -> Zone 2 Boundary (L1)", minval=1, maxval=500, group=grpCCI, tooltip="Values 0 to L1 are Zone 1.")
+cciThresh2    = input.int(34,     "Zone 2 -> Zone 3 Boundary (L2)", minval=1, maxval=500, group=grpCCI, tooltip="Values L1 to L2 are Zone 2.")
+cciThresh3    = input.int(55,     "Zone 3 -> Zone 4 Boundary (L3)", minval=1, maxval=500, group=grpCCI, tooltip="Values L2 to L3 are Zone 3.")
+cciThresh4    = input.int(89,     "Zone 4 -> Zone 5 Boundary (L4)", minval=1, maxval=500, group=grpCCI, tooltip="Values L3 to L4 are Zone 4.")
+cciThresh5    = input.int(144,    "Zone 5 Extreme Threshold (L5)",  minval=1, maxval=500, group=grpCCI, tooltip="Values above L5 are Extreme Zone 5.")
+
+// ══════════════════════════════════════════════════════════════
+// █  CCI COLORS (5 BULL & 5 BEAR ZONES)
+// ══════════════════════════════════════════════════════════════
+grpBull       = "█  Bull Colors (Positive CCI)"
+cciBull1      = input.color(color.new(#1A237E, 30), "Zone 1 (0 to L1)",        group=grpBull)
+cciBull2      = input.color(color.new(#81C784, 20), "Zone 2 (L1 to L2)",      group=grpBull)
+cciBull3      = input.color(color.new(#CDDC39, 20), "Zone 3 (L2 to L3)",      group=grpBull)
+cciBull4      = input.color(color.new(#00E676, 10), "Zone 4 (L3 to L4/L5)",  group=grpBull)
+cciBull5      = input.color(color.new(#FFEB3B, 0),  "Zone 5 (Above L5 Extreme)", group=grpBull)
+
+grpBear       = "█  Bear Colors (Negative CCI)"
+cciBear1      = input.color(color.new(#311B92, 30), "Zone 1 (0 to -L1)",       group=grpBear)
+cciBear2      = input.color(color.new(#F48FB1, 20), "Zone 2 (-L1 to -L2)",     group=grpBear)
+cciBear3      = input.color(color.new(#FF9800, 20), "Zone 3 (-L2 to -L3)",     group=grpBear)
+cciBear4      = input.color(color.new(#FF5722, 10), "Zone 4 (-L3 to -L4/L5)", group=grpBear)
+cciBear5      = input.color(color.new(#F44336, 0),  "Zone 5 (Below -L5 Extreme)", group=grpBear)
+
+// ══════════════════════════════════════════════════════════════
+// █  T3 SMOOTHING
+// ══════════════════════════════════════════════════════════════
+grpT3         = "█  T3 Smoothing"
+cciEntryLen   = input.int(5,       "Entry CCI Period (Fast)", minval=1, maxval=500, group=grpT3)
+T3_Period     = input.int(5,       "T3 Smoothing Period", minval=1, maxval=50, group=grpT3)
+b_factor      = input.float(0.618, "T3 Volume Factor (b)", minval=0.0, maxval=1.0, step=0.001, group=grpT3)
+useCCI14      = input.bool(true,   "Use Entry CCI for Bar Colors", group=grpT3)
+
+// ══════════════════════════════════════════════════════════════
+// T3 FUNCTION
+// ══════════════════════════════════════════════════════════════
+f_t3(_src, _length, _b) =>
+    b2 = _b * _b
+    b3 = b2 * _b
+    c1 = -b3
+    c2 = 3 * (b2 + b3)
+    c3 = -3 * (2 * b2 + _b + b3)
+    c4 = 1 + 3 * _b + b3 + 3 * b2
+    
+    nn = _length < 1 ? 1 : _length
+    nr = 1 + 0.5 * (nn - 1)
+    w1 = 2 / (nr + 1)
+    w2 = 1 - w1
+    
+    var float e1 = na, var float e2 = na, var float e3 = na
+    var float e4 = na, var float e5 = na, var float e6 = na
+    
+    e1 := w1 * _src + w2 * nz(e1[1])
+    e2 := w1 * e1   + w2 * nz(e2[1])
+    e3 := w1 * e2   + w2 * nz(e3[1])
+    e4 := w1 * e3   + w2 * nz(e4[1])
+    e5 := w1 * e4   + w2 * nz(e5[1])
+    e6 := w1 * e5   + w2 * nz(e6[1])
+    
+    c1 * e6 + c2 * e5 + c3 * e4 + c4 * e3
+
+// ══════════════════════════════════════════════════════════════
+// CALCULATIONS
+// ══════════════════════════════════════════════════════════════
+xccir   = f_t3(ta.cci(close, cciLen), T3_Period, b_factor)
+xccir14 = f_t3(ta.cci(close, cciEntryLen), T3_Period, b_factor)
+
+cciVal  = useCCI14 ? xccir14 : xccir
+
+// ══════════════════════════════════════════════════════════════
+// 5-THRESHOLD GAPLESS COLOR MAPPING LOGIC
+// ══════════════════════════════════════════════════════════════
+var color cciColor = na
+
+if cciVal >= cciThresh5
+    cciColor := cciBull5
+else if cciVal >= cciThresh4
+    cciColor := cciBull4
+else if cciVal >= cciThresh3
+    cciColor := cciBull3
+else if cciVal >= cciThresh2
+    cciColor := cciBull2
+else if cciVal >= 0
+    cciColor := cciBull1
+else if cciVal <= -cciThresh5
+    cciColor := cciBear5
+else if cciVal <= -cciThresh4
+    cciColor := cciBear4
+else if cciVal <= -cciThresh3
+    cciColor := cciBear3
+else if cciVal <= -cciThresh2
+    cciColor := cciBear2
+else
+    cciColor := cciBear1
+
+// ══════════════════════════════════════════════════════════════
+// BAR COLORS
+// ══════════════════════════════════════════════════════════════
+barcolor(showHeatmap ? cciColor : na, title="5-Zone CCI Heatmap Bars")
