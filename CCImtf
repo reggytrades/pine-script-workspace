@@ -1,0 +1,110 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Custom Ultra-Light 3x MTF CCI Ribbon
+
+//@version=6
+indicator("CCImtf", shorttitle="CCImtf", overlay=false)
+
+// ══════════════════════════════════════════════════════════════
+// █  SETTINGS
+// ══════════════════════════════════════════════════════════════
+grpCCI   = "█  CCI & Filter Settings"
+cciLen   = input.int(13,       "CCI Period",        minval=1, group=grpCCI)
+t3Len    = input.int(5,        "T3 Period",         minval=1, group=grpCCI)
+bFact    = input.float(0.618,  "T3 Volume Factor",  step=0.001, group=grpCCI)
+cciThresh= input.int(55,       "CCI On/Off Threshold (+/-)", group=grpCCI)
+
+grpMult  = "█  Timeframe Multipliers"
+useExact = input.bool(true,  "Use Exact Custom Timeframes (Paid TV Plans)", group=grpMult)
+m1       = input.int(2, "Ribbon 1 Multiplier (e.g. 2x)", minval=1, group=grpMult)
+m2       = input.int(3, "Ribbon 2 Multiplier (e.g. 3x)", minval=1, group=grpMult)
+m3       = input.int(4, "Ribbon 3 Multiplier (e.g. 4x)", minval=1, group=grpMult)
+
+grpCol   = "█  On/Off Colors"
+cBull    = input.color(#00E676, "Bullish (>= Threshold)", group=grpCol)
+cBear    = input.color(#FF1744, "Bearish (<= -Threshold)", group=grpCol)
+cOff     = input.color(#37474F, "Off / Neutral", group=grpCol)
+
+// ══════════════════════════════════════════════════════════════
+// █  TIMEFRAME CALCULATION ROUTINE
+// ══════════════════════════════════════════════════════════════
+f_resolve_tf(int _mult, bool _exact) =>
+    float currentSecs = timeframe.multiplier * (timeframe.isseconds ? 1.0 : timeframe.isdaily ? 86400.0 : timeframe.isweekly ? 604800.0 : timeframe.ismonthly ? 2592000.0 : 60.0)
+    int targetSecs = math.round(currentSecs * _mult)
+    string resStr = ""
+
+    if _exact
+        // Produce exact arbitrary timeframe strings
+        if targetSecs < 60
+            resStr := str.tostring(targetSecs) + "S"
+        else if targetSecs >= 86400 and targetSecs % 86400 == 0
+            resStr := str.tostring(targetSecs / 86400) + "D"
+        else
+            resStr := str.tostring(math.max(1, math.round(targetSecs / 60)))
+    else
+        // Standard TradingView interval benchmarks
+        int[] standardTfs = array.from(5, 10, 15, 30, 45, 60, 180, 300, 900, 1800, 2700, 3600, 7200, 10800, 14400, 21600, 43200, 86400)
+        int resolvedSecs = array.get(standardTfs, 0)
+        
+        for i = 0 to array.size(standardTfs) - 1
+            int tfVal = array.get(standardTfs, i)
+            if tfVal <= targetSecs
+                resolvedSecs := tfVal
+
+        if resolvedSecs < 60
+            resStr := str.tostring(resolvedSecs) + "S"
+        else if resolvedSecs >= 86400
+            resStr := str.tostring(math.round(resolvedSecs / 86400)) + "D"
+        else
+            resStr := str.tostring(math.round(resolvedSecs / 60))
+
+    resStr
+
+tfStr1 = f_resolve_tf(m1, useExact)
+tfStr2 = f_resolve_tf(m2, useExact)
+tfStr3 = f_resolve_tf(m3, useExact)
+
+// ══════════════════════════════════════════════════════════════
+// █  T3 SMOOTHED CCI & ON/OFF STATE CALCULATION
+// ══════════════════════════════════════════════════════════════
+f_t3(_src, _length, _b) =>
+    b2 = _b * _b, b3 = b2 * _b
+    c1 = -b3, c2 = 3 * (b2 + b3)
+    c3 = -3 * (2 * b2 + _b + b3), c4 = 1 + 3 * _b + b3 + 3 * b2
+    nn = _length < 1 ? 1 : _length
+    nr = 1 + 0.5 * (nn - 1)
+    w1 = 2 / (nr + 1), w2 = 1 - w1
+    var float e1 = na, var float e2 = na, var float e3 = na
+    var float e4 = na, var float e5 = na, var float e6 = na
+    e1 := w1 * _src + w2 * nz(e1[1])
+    e2 := w1 * e1   + w2 * nz(e2[1])
+    e3 := w1 * e2   + w2 * nz(e3[1])
+    e4 := w1 * e3   + w2 * nz(e4[1])
+    e5 := w1 * e4   + w2 * nz(e5[1])
+    e6 := w1 * e5   + w2 * nz(e6[1])
+    c1 * e6 + c2 * e5 + c3 * e4 + c4 * e3
+
+f_cci_state() =>
+    val = f_t3(ta.cci(close, cciLen), t3Len, bFact)
+    int state = 0 // 0 = Off/Neutral
+    if val >= cciThresh
+        state := 1  // Bull On
+    else if val <= -cciThresh
+        state := -1 // Bear On
+    state
+
+// Request states across dynamic TFs
+s1 = request.security(syminfo.tickerid, tfStr1, f_cci_state(), gaps=barmerge.gaps_off)
+s2 = request.security(syminfo.tickerid, tfStr2, f_cci_state(), gaps=barmerge.gaps_off)
+s3 = request.security(syminfo.tickerid, tfStr3, f_cci_state(), gaps=barmerge.gaps_off)
+
+// ══════════════════════════════════════════════════════════════
+// █  MATRIX PLOTS
+// ══════════════════════════════════════════════════════════════
+color col1 = s1 == 1 ? cBull : s1 == -1 ? cBear : cOff
+color col2 = s2 == 1 ? cBull : s2 == -1 ? cBear : cOff
+color col3 = s3 == 1 ? cBull : s3 == -1 ? cBear : cOff
+
+// Plot 3 compact stacked dot ribbons
+plot(3.0, "Ribbon 3 (Highest Mult)", color=col3, style=plot.style_circles, linewidth=4)
+plot(2.0, "Ribbon 2 (Mid Mult)",     color=col2, style=plot.style_circles, linewidth=4)
+plot(1.0, "Ribbon 1 (Low Mult)",     color=col1, style=plot.style_circles, linewidth=4)
